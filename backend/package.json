@@ -1,0 +1,25 @@
+{
+  "name": "leetcode-style-coding-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "build:runners": "docker build -t python-runner:3.12 ./docker/runners/python-runner && docker build -t java-runner:21 ./docker/runners/java-runner && docker build -t cpp-runner:17 ./docker/runners/cpp-runner",
+    "seed:sample": "node src/modules/seed/sampleProblem.seed.js",
+    "seed:json": "node src/modules/seed/importSeedJson.seed.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "mongoose": "^8.9.5",
+    "nanoid": "^5.0.9",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

@@ -18,3 +18,4 @@ yarn-error.log*
 *.log
 /backend/.env
 /backend/src/modules/seed
+ques.md

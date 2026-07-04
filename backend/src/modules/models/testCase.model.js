@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
-
+// Seprate Testcase Schema as we dont need everything required to Problem 
+// if we embed it Document will be huge and we need to fetch lot of Unnecessary Information 
 const testCaseSchema = new mongoose.Schema(
   {
     problemId: {
