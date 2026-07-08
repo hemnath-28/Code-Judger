@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { executeCode } from './execution.service.js';
-import { buildHarness } from './harness.service.js';
+import { buildHarness, buildBatchHarness } from './harness.service.js';
 import { Problem } from '../models/problem.model.js';
 import { Submission } from '../models/submission.model.js';
 import { TestCase } from '../models/testCase.model.js';
@@ -25,50 +25,83 @@ export async function judgeSubmission({ userId, problemId, language, code }) {
     throw apiError(409, 'No hidden test cases configured for this problem');
   }
 
+  // Build batch harness for all hidden test cases
+  const inputs = testCases.map(tc => tc.input);
+  const execution = buildBatchHarness({
+    problem,
+    language,
+    code,
+    inputs
+  });
+
+  // Execute batch wrapper in the warm container pool (or host reference)
+  // Give it an aggregate timeout buffer (timeLimitMs * testCases.length) to prevent premature TLE
+  const result = await executeCode({
+    language,
+    code: execution.code,
+    input: execution.input,
+    timeoutMs: problem.timeLimitMs * testCases.length,
+    memoryLimitMb: problem.memoryLimitMb
+  });
+
   let verdict = 'Accepted';
   let passed = 0;
-  let runtimeMs = 0;
   let failedTest = null;
+  const runtimeMs = result.runtimeMs;
 
-  for (const testCase of testCases) {
-    const execution = buildHarness({
-      problem,
-      language,
-      code,
-      input: testCase.input
-    });
+  const rawLines = result.output ? result.output.split('\n').map(l => l.trim()) : [];
+  const testcaseOutputs = [];
+  const userStdoutLines = [];
 
-    const result = await executeCode({
-      language,
-      code: execution.code,
-      input: execution.input,
-      timeoutMs: problem.timeLimitMs,
-      memoryLimitMb: problem.memoryLimitMb
-    });
+  for (const line of rawLines) {
+    if (line.startsWith('__RESULT__:')) {
+      testcaseOutputs.push(line.slice(11).trim());
+    } else if (line.length > 0) {
+      userStdoutLines.push(line);
+    }
+  }
 
-    runtimeMs += result.runtimeMs;
+  const userStdout = userStdoutLines.join('\n');
 
-    if (!result.ok) {
-      verdict = result.verdict;
+  for (let i = 0; i < testCases.length; i++) {
+    const tc = testCases[i];
+
+    // If execution stopped before printing outputs for remaining cases
+    if (i >= testcaseOutputs.length) {
+      verdict = result.verdict || 'Runtime Error';
       failedTest = {
-        input: testCase.input,
-        expectedOutput: testCase.expectedOutput,
+        input: tc.input,
+        expectedOutput: tc.expectedOutput,
         actualOutput: null,
-        error: result.error
+        error: result.error || (userStdout ? `Stdout:\n${userStdout}\n\nExecution stopped` : 'Execution stopped')
       };
       break;
     }
 
-    const normActual = normalizeOutput(result.output);
-    const normExpected = normalizeOutput(testCase.expectedOutput);
+    const line = testcaseOutputs[i];
+
+    // If an error occurred inside the harness loop on this case
+    if (line.startsWith('ERROR:')) {
+      verdict = 'Runtime Error';
+      failedTest = {
+        input: tc.input,
+        expectedOutput: tc.expectedOutput,
+        actualOutput: null,
+        error: line.slice(6) + (userStdout ? `\n\nStdout:\n${userStdout}` : '')
+      };
+      break;
+    }
+
+    const normActual = normalizeOutput(line);
+    const normExpected = normalizeOutput(tc.expectedOutput);
 
     if (normActual !== normExpected) {
       verdict = 'Wrong Answer';
       failedTest = {
-        input: testCase.input,
-        expectedOutput: testCase.expectedOutput,
-        actualOutput: result.output,
-        error: null
+        input: tc.input,
+        expectedOutput: tc.expectedOutput,
+        actualOutput: line,
+        error: userStdout ? `Stdout:\n${userStdout}` : null
       };
       break;
     }
@@ -97,3 +130,4 @@ export async function judgeSubmission({ userId, problemId, language, code }) {
     failedTest
   };
 }
+

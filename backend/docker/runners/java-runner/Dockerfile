@@ -8,7 +8,13 @@ RUN find /opt/java -name "*.diz" -delete && \
     find /opt/java -name "src.zip"  -delete 2>/dev/null || true
 
 RUN adduser -D -H -s /sbin/nologin runner
-USER runner
 WORKDIR /workspace
 
-CMD ["java", "-version"]
+RUN mkdir -p /opt/runner
+COPY WarmRunner.java /opt/runner/WarmRunner.java
+RUN javac /opt/runner/WarmRunner.java && chown -R runner:runner /workspace /opt/runner
+
+USER runner
+CMD ["java", "-cp", "/opt/runner", "WarmRunner"]
+
+

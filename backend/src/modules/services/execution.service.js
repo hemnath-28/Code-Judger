@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { nanoid } from 'nanoid';
 import { env } from '../../config/env.js';
+import * as pool from './pool.service.js';
 
 // Docker Desktop (linuxkit VM) adds ~15-35s of container startup overhead.
 // This buffer is subtracted from the wall-clock time to get actual code runtime.
@@ -219,75 +220,88 @@ export async function executeCode({
     throw error;
   }
 
-  const jobId = nanoid();
-  const workdir = path.join(runnerTmpRoot, `coding-job-${jobId}`);
-  const containerName = `coding-${language}-${jobId}`;
+  if (runOnHost) {
+    const jobId = nanoid();
+    const workdir = path.join(runnerTmpRoot, `coding-job-${jobId}`);
+    await mkdir(workdir, { recursive: true });
+    await chmod(workdir, 0o777);
+    const sourcePath = path.join(workdir, config.fileName);
+    await writeFile(sourcePath, code, 'utf8');
+    await chmod(sourcePath, 0o666);
 
-  await mkdir(workdir, { recursive: true });
-  await chmod(workdir, 0o777);
-  const sourcePath = path.join(workdir, config.fileName);
-  await writeFile(sourcePath, code, 'utf8');
-  await chmod(sourcePath, 0o666);
-
-  try {
-    let result;
-    if (runOnHost) {
-      result = await runHostProcess({
+    try {
+      const result = await runHostProcess({
         command: config.command[0],
         args: config.command.slice(1).map(arg => arg === '/workspace/main.py' ? sourcePath : arg),
         input,
         timeoutMs
       });
-    } else {
-      const args = [
-        ...dockerArgs({
-          image: config.image,
-          workdir,
-          containerName,
-          timeoutMs,
-          memoryMb: memoryLimitMb
-        }),
-        ...config.command
-      ];
 
-      result = await runDockerProcess({
-        args,
-        input,
-        timeoutMs,
-        containerName
-      });
+      // Parse timing from stderr and clean it up
+      let cleanStderr = result.stderr || '';
+      let executionMs = result.runtimeMs;
+      const match = cleanStderr.match(/EXECUTION_TIME_MS:([0-9.]+)/);
+      if (match) {
+        executionMs = Math.max(0, Math.round(parseFloat(match[1])));
+        cleanStderr = cleanStderr.replace(/EXECUTION_TIME_MS:[0-9.]+\r?\n?/, '').trim();
+      }
+
+      if (result.exitCode === 0 && !result.timedOut) {
+        return {
+          ok: true,
+          output: result.stdout,
+          error: null,
+          stderr: cleanStderr || null,
+          runtimeMs: executionMs,
+          verdict: null
+        };
+      }
+
+      const verdict = classifyFailure(result);
+      return {
+        ok: false,
+        output: result.stdout,
+        error: cleanStderr || verdict,
+        stderr: cleanStderr || null,
+        runtimeMs: executionMs,
+        verdict
+      };
+    } finally {
+      await rm(workdir, { recursive: true, force: true });
     }
+  }
 
-    // Parse timing from stderr and clean it up
-    let cleanStderr = result.stderr || '';
-    let executionMs = result.runtimeMs;
+  // Running inside the Warm Container Pool via TCP
+  const container = await pool.acquire(language);
+  try {
+    const poolRes = await pool.executeOnContainer(container, code, input, timeoutMs);
+    
+    let cleanStderr = poolRes.stderr || '';
+    let executionMs = poolRes.runtimeMs;
     const match = cleanStderr.match(/EXECUTION_TIME_MS:([0-9.]+)/);
     if (match) {
       executionMs = Math.max(0, Math.round(parseFloat(match[1])));
       cleanStderr = cleanStderr.replace(/EXECUTION_TIME_MS:[0-9.]+\r?\n?/, '').trim();
     }
 
-    if (result.exitCode === 0 && !result.timedOut) {
-      return {
-        ok: true,
-        output: result.stdout,
-        error: null,
-        stderr: cleanStderr || null,
-        runtimeMs: executionMs,
-        verdict: null
-      };
-    }
+    const verdict = poolRes.timedOut 
+      ? 'Time Limit Exceeded' 
+      : (poolRes.ok 
+          ? null 
+          : (cleanStderr.includes('javac') || cleanStderr.includes('g++') || cleanStderr.includes('compilation') || cleanStderr.includes('compile') 
+              ? 'Compilation Error' 
+              : 'Runtime Error'));
 
-    const verdict = classifyFailure(result);
     return {
-      ok: false,
-      output: result.stdout,
-      error: cleanStderr || verdict,
+      ok: poolRes.ok,
+      output: poolRes.stdout,
+      error: poolRes.ok ? null : (cleanStderr || verdict),
       stderr: cleanStderr || null,
       runtimeMs: executionMs,
       verdict
     };
   } finally {
-    await rm(workdir, { recursive: true, force: true });
+    await pool.release(container);
   }
 }
+
