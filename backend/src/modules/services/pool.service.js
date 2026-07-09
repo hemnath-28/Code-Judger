@@ -7,9 +7,9 @@ process.env.DOCKER_API_VERSION = process.env.DOCKER_API_VERSION || '1.54';
 
 
 const POOL_CONFIG = {
-  python: { size: 5, portStart: 9000, image: env.docker.images.python },
-  java:   { size: 3, portStart: 9005, image: env.docker.images.java },
-  cpp:    { size: 3, portStart: 9008, image: env.docker.images.cpp }
+  python: { size: 2, portStart: 9000, image: env.docker.images.python },
+  java:   { size: 1, portStart: 9005, image: env.docker.images.java },
+  cpp:    { size: 1, portStart: 9008, image: env.docker.images.cpp }
 };
 
 const MAX_RUNS_BEFORE_RECYCLE = 100;
@@ -29,7 +29,7 @@ const waitingQueues = {
 let poolInitialized = false;
 
 function getContainerName(lang, index) {
-  return `coding-pool-${lang}-${index}`;
+  return `pool-v2-${lang}-${index}`;
 }
 
 async function startContainer(lang, index, port) {
@@ -71,7 +71,7 @@ export async function initPool() {
 
   // Clean up any legacy pool containers
   try {
-    execSync('docker rm -f $(docker ps -a -q --filter "name=coding-pool-")', { stdio: 'ignore' });
+    execSync('docker rm -f $(docker ps -a -q --filter "name=pool-v2-")', { stdio: 'ignore' });
   } catch (e) {}
 
 

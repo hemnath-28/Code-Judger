@@ -33,7 +33,7 @@ export async function runCode(req, res, next) {
     });
 
     res.json({
-      output: result.output,m
+      output: result.output,
       error: result.error
     });
   } catch (error) {
