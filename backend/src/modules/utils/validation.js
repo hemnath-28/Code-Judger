@@ -47,3 +47,11 @@ export const problemIdParamSchema = z.object({
   }),
   query: z.object({}).passthrough()
 });
+
+export const submissionIdParamSchema = z.object({
+  body: z.object({}).passthrough(),
+  params: z.object({
+    submissionId: z.string().min(1)
+  }),
+  query: z.object({}).passthrough()
+});

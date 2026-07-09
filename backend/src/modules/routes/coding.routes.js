@@ -6,13 +6,15 @@ import {
   listSubmissions,
   runBatch,
   runCode,
-  submitCode
+  submitCode,
+  getSubmissionStatus
 } from '../controllers/coding.controller.js';
 import {
   problemIdParamSchema,
   runBatchSchema,
   runSchema,
-  submitSchema
+  submitSchema,
+  submissionIdParamSchema
 } from '../utils/validation.js';
 
 const router = Router();
@@ -22,6 +24,7 @@ router.get('/problems/:problemId', validateRequest(problemIdParamSchema), getPro
 router.post('/run', validateRequest(runSchema), runCode);
 router.post('/run/batch', validateRequest(runBatchSchema), runBatch);
 router.post('/submit', validateRequest(submitSchema), submitCode);
+router.get('/submissions/status/:submissionId', validateRequest(submissionIdParamSchema), getSubmissionStatus);
 router.get('/submissions', listSubmissions);
 
 export default router;

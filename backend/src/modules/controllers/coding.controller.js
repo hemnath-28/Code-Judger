@@ -7,6 +7,8 @@ import { Submission } from '../models/submission.model.js';
 import { TestCase } from '../models/testCase.model.js';
 import { apiError } from '../utils/apiError.js';
 import { normalizeOutput } from '../utils/normalizeOutput.js';
+import { redisClient } from '../../config/redis.js';
+import { addSubmissionJob } from '../queues/submission.queue.js';
 // Contorller Funcitno to Run the Code 
 // First build the Harnness File To run/compile it Directly
 
@@ -31,7 +33,7 @@ export async function runCode(req, res, next) {
     });
 
     res.json({
-      output: result.output,
+      output: result.output,m
       error: result.error
     });
   } catch (error) {
@@ -163,8 +165,64 @@ export async function submitCode(req, res, next) {
   try {
     const { problemId, language, code } = req.validated.body;
     const userId = req.user?._id || req.user?.id;
-    const result = await judgeSubmission({ userId, problemId, language, code });
-    res.json(result);
+
+    // Generate unique submission ID
+    const submissionId = new mongoose.Types.ObjectId();
+
+    // 1. Store transient pending status in Redis (expires in 10 minutes)
+    await redisClient.set(
+      `sub:status:${submissionId}`,
+      JSON.stringify({ status: 'Pending' }),
+      { EX: 600 }
+    );
+
+    // 2. Queue the code execution task
+    await addSubmissionJob({
+      submissionId,
+      problemId,
+      language,
+      code,
+      userId
+    });
+
+    res.json({
+      submissionId,
+      status: 'Pending'
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Get the real-time status of a submission
+export async function getSubmissionStatus(req, res, next) {
+  try {
+    const { submissionId } = req.validated.params;
+
+    // 1. Query transient status in Redis
+    const cachedStatus = await redisClient.get(`sub:status:${submissionId}`);
+    if (cachedStatus) {
+      return res.json(JSON.parse(cachedStatus));
+    }
+
+    // 2. Fallback to MongoDB if not present in Redis
+    const submission = await Submission.findById(submissionId).lean();
+    if (!submission) {
+      throw apiError(404, 'Submission not found');
+    }
+
+    // Return mapped completed format to match transient format
+    res.json({
+      status: 'Completed',
+      result: {
+        verdict: submission.verdict,
+        passed: submission.passed,
+        total: submission.total,
+        runtime: `${submission.runtimeMs}ms`,
+        submissionId: submission._id,
+        failedTest: submission.failedTest
+      }
+    });
   } catch (error) {
     next(error);
   }

@@ -85,5 +85,5 @@ submissionWorker.on('completed', (job) => {
 });
 
 submissionWorker.on('failed', (job, err) => {
-  console.error(`Job ${job?.id} failed with error:`, err);
+  console.error(`Job ${job?.id} failed with {error:`, err);
 });
