@@ -94,10 +94,6 @@ export async function initPool() {
 
   poolInitialized = true;
   console.log('Warm Container Pool Initialized successfully.');
-
-  // Hook exit handlers for clean shutdown
-  process.on('SIGINT', shutdownPool);
-  process.on('SIGTERM', shutdownPool);
 }
 
 export async function shutdownPool() {
@@ -115,7 +111,6 @@ export async function shutdownPool() {
   
   poolInitialized = false;
   console.log('Warm Container Pool Shutdown complete.');
-  process.exit(0);
 }
 
 export function acquire(lang) {
