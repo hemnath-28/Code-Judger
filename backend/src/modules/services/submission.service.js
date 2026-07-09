@@ -7,7 +7,7 @@ import { TestCase } from '../models/testCase.model.js';
 import { apiError } from '../utils/apiError.js';
 import { normalizeOutput } from '../utils/normalizeOutput.js';
 
-export async function judgeSubmission({ userId, problemId, language, code }) {
+export async function judgeSubmission({ submissionId, userId, problemId, language, code }) {
   if (!mongoose.Types.ObjectId.isValid(problemId)) {
     throw apiError(400, 'Invalid problemId');
   }
@@ -109,7 +109,8 @@ export async function judgeSubmission({ userId, problemId, language, code }) {
     passed += 1;
   }
 
-  const submission = await Submission.create({
+  const submissionDoc = {
+    _id: submissionId,
     userId,
     problemId,
     language,
@@ -118,16 +119,20 @@ export async function judgeSubmission({ userId, problemId, language, code }) {
     total: testCases.length,
     runtimeMs,
     code,
-    failedTest
-  });
+    failedTest,
+    submittedAt: new Date()
+  };
 
   return {
-    verdict,
-    passed,
-    total: testCases.length,
-    runtime: `${runtimeMs}ms`,
-    submissionId: submission._id,
-    failedTest
+    submissionDoc,
+    result: {
+      verdict,
+      passed,
+      total: testCases.length,
+      runtime: `${runtimeMs}ms`,
+      submissionId,
+      failedTest
+    }
   };
 }
 
