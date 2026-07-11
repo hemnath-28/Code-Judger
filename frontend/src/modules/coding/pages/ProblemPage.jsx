@@ -6,7 +6,7 @@ import ConsolePanel from '../components/ConsolePanel.jsx';
 import LanguageSelector from '../components/LanguageSelector.jsx';
 import TestCasePanel from '../components/TestCasePanel.jsx';
 import VerdictBadge from '../components/VerdictBadge.jsx';
-import { fetchProblem, runBatch, submitCode } from '../services/codingApi.js';
+import { fetchProblem, runBatch, submitCode, getSubmissionStatus } from '../services/codingApi.js';
 
 /* ─────────────────────────── helpers ─────────────────────────── */
 
@@ -150,11 +150,28 @@ export default function ProblemPage() {
     setSubmission(null);
 
     try {
-      const result = await submitCode({ problemId: problem._id, language, code });
-      setSubmission(result);
+      const response = await submitCode({ problemId: problem._id, language, code });
+      const submissionId = response.submissionId;
+
+      // Poll for submission result
+      let attempts = 0;
+      const maxAttempts = 120; // 60 seconds max
+
+      while (attempts < maxAttempts) {
+        attempts++;
+        await new Promise((resolve) => setTimeout(resolve, 500)); // wait 500ms
+
+        const statusRes = await getSubmissionStatus(submissionId);
+        if (statusRes.status === 'Completed' || statusRes.status === 'Failed') {
+          setSubmission(statusRes.result);
+          return;
+        }
+      }
+
+      throw new Error('Judging timed out');
     } catch (err) {
       setSubmission({
-        verdict: err.response?.data?.message || 'Submit failed',
+        verdict: err.response?.data?.message || err.message || 'Submit failed',
         passed: 0,
         total: 0,
         runtime: '—'

@@ -1,15 +1,20 @@
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import net from 'net';
 import { env } from '../../config/env.js';
+
+const execAsync = promisify(exec);
 
 // Prevent Docker API version mismatch errors on local systems
 process.env.DOCKER_API_VERSION = process.env.DOCKER_API_VERSION || '1.54';
 
 
+const DYNAMIC_PORT_START = Math.floor(Math.random() * 20000) + 15000;
+
 const POOL_CONFIG = {
-  python: { size: 2, portStart: 9000, image: env.docker.images.python },
-  java:   { size: 1, portStart: 9005, image: env.docker.images.java },
-  cpp:    { size: 1, portStart: 9008, image: env.docker.images.cpp }
+  python: { size: 100, portStart: DYNAMIC_PORT_START, image: env.docker.images.python },
+  java:   { size: 0,   portStart: DYNAMIC_PORT_START + 150, image: env.docker.images.java },
+  cpp:    { size: 0,   portStart: DYNAMIC_PORT_START + 150, image: env.docker.images.cpp }
 };
 
 const MAX_RUNS_BEFORE_RECYCLE = 100;
@@ -26,10 +31,12 @@ const waitingQueues = {
   cpp: []
 };
 
+const RUN_ID = Math.random().toString(36).substring(2, 6);
+
 let poolInitialized = false;
 
 function getContainerName(lang, index) {
-  return `pool-v2-${lang}-${index}`;
+  return `pool-${RUN_ID}-${lang}-${index}`;
 }
 
 async function startContainer(lang, index, port) {
@@ -38,7 +45,7 @@ async function startContainer(lang, index, port) {
   
   // Clean up any existing container with the same name
   try {
-    execSync(`docker rm -f ${name}`, { stdio: 'ignore' });
+    await execAsync(`docker rm -f ${name}`);
   } catch (e) {}
 
   const runCmd = [
@@ -55,31 +62,40 @@ async function startContainer(lang, index, port) {
     image
   ].join(' ');
 
-  console.log(`Starting warm container ${name} on port ${port}...`);
-  execSync(runCmd);
+  await execAsync(runCmd);
 }
 
 export async function initPool() {
   if (poolInitialized) return;
-  
   console.log('Initializing Warm Container Pool...');
   
   // Ensure the bridge network exists (plain bridge so port-publishing works)
   try {
-    execSync('docker network create coding-bridge', { stdio: 'ignore' });
+    await execAsync('docker network create coding-bridge');
   } catch (e) {}
 
-  // Clean up any legacy pool containers
+  // Bulk cleanup of ALL pool containers (running, created, dead, exited) to free host ports
+  // Uses a 10s timeout so the server doesn't hang if Docker has deadlocked "removal in progress" containers.
   try {
-    execSync('docker rm -f $(docker ps -a -q --filter "name=pool-v2-")', { stdio: 'ignore' });
-  } catch (e) {}
+    const listCmd = 'docker ps -aq --filter "name=pool-"';
+    const { stdout } = await execAsync(listCmd, { timeout: 5000 });
+    const ids = stdout.trim();
+    if (ids) {
+      console.log('Removing all old pool containers to free ports...');
+      await execAsync(`docker rm -f ${ids.split('\n').join(' ')}`, { timeout: 10000 });
+    }
+  } catch (e) {
+    // Ignore cleanup errors (e.g. Docker containerd zombie containers in "removal in progress").
+    // New containers use unique RUN_ID names so they won't conflict with orphaned ones.
+  }
 
+
+  const tasks = [];
 
   for (const lang of Object.keys(POOL_CONFIG)) {
     const config = POOL_CONFIG[lang];
     for (let i = 0; i < config.size; i++) {
       const port = config.portStart + i;
-      await startContainer(lang, i, port);
       
       containers[lang].push({
         name: getContainerName(lang, i),
@@ -89,8 +105,29 @@ export async function initPool() {
         status: 'idle',
         runs: 0
       });
+
+      tasks.push({ lang, index: i, port });
     }
   }
+
+  // Concurrency-limited execution (max 3 concurrent container starts)
+  const CONCURRENCY_LIMIT = 10;
+  const executing = new Set();
+  for (const task of tasks) {
+    const p = (async () => {
+      console.log(`Starting warm container ${getContainerName(task.lang, task.index)} on port ${task.port}...`);
+      await startContainer(task.lang, task.index, task.port);
+    })();
+    
+    executing.add(p);
+    const clean = () => executing.delete(p);
+    p.then(clean, clean);
+    
+    if (executing.size >= CONCURRENCY_LIMIT) {
+      await Promise.race(executing);
+    }
+  }
+  await Promise.all(executing);
 
   poolInitialized = true;
   console.log('Warm Container Pool Initialized successfully.');
@@ -100,14 +137,18 @@ export async function shutdownPool() {
   if (!poolInitialized) return;
   console.log('\nShutting down Warm Container Pool...');
   
+  const stopPromises = [];
   for (const lang of Object.keys(POOL_CONFIG)) {
     for (const container of containers[lang]) {
-      try {
-        console.log(`Stopping container ${container.name}...`);
-        execSync(`docker rm -f ${container.name}`, { stdio: 'ignore' });
-      } catch (e) {}
+      stopPromises.push((async () => {
+        try {
+          console.log(`Stopping container ${container.name}...`);
+          await execAsync(`docker rm -f ${container.name}`);
+        } catch (e) {}
+      })());
     }
   }
+  await Promise.all(stopPromises);
   
   poolInitialized = false;
   console.log('Warm Container Pool Shutdown complete.');

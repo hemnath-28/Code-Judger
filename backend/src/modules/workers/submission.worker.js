@@ -76,7 +76,7 @@ export const submissionWorker = new Worker(
   },
   {
     connection: bullDbConnection,
-    concurrency: 11 // Matches the warm container pool size
+    concurrency: 150 // Limit concurrent job executions to 150
   }
 );
 

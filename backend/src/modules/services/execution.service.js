@@ -272,36 +272,53 @@ export async function executeCode({
   }
 
   // Running inside the Warm Container Pool via TCP
-  const container = await pool.acquire(language);
-  try {
-    const poolRes = await pool.executeOnContainer(container, code, input, timeoutMs);
-    
-    let cleanStderr = poolRes.stderr || '';
-    let executionMs = poolRes.runtimeMs;
-    const match = cleanStderr.match(/EXECUTION_TIME_MS:([0-9.]+)/);
-    if (match) {
-      executionMs = Math.max(0, Math.round(parseFloat(match[1])));
-      cleanStderr = cleanStderr.replace(/EXECUTION_TIME_MS:[0-9.]+\r?\n?/, '').trim();
+  let attempts = 0;
+  const maxAttempts = 3;
+  let lastError;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    const container = await pool.acquire(language);
+    try {
+      const poolRes = await pool.executeOnContainer(container, code, input, timeoutMs);
+      
+      let cleanStderr = poolRes.stderr || '';
+      let executionMs = poolRes.runtimeMs;
+      const match = cleanStderr.match(/EXECUTION_TIME_MS:([0-9.]+)/);
+      if (match) {
+        executionMs = Math.max(0, Math.round(parseFloat(match[1])));
+        cleanStderr = cleanStderr.replace(/EXECUTION_TIME_MS:[0-9.]+\r?\n?/, '').trim();
+      }
+
+      const verdict = poolRes.timedOut 
+        ? 'Time Limit Exceeded' 
+        : (poolRes.ok 
+            ? null 
+            : (cleanStderr.includes('javac') || cleanStderr.includes('g++') || cleanStderr.includes('compilation') || cleanStderr.includes('compile') 
+                ? 'Compilation Error' 
+                : 'Runtime Error'));
+
+      return {
+        ok: poolRes.ok,
+        output: poolRes.stdout,
+        error: poolRes.ok ? null : (cleanStderr || verdict),
+        stderr: cleanStderr || null,
+        runtimeMs: executionMs,
+        verdict
+      };
+    } catch (err) {
+      lastError = err;
+      if (err.message && (err.message.includes('ECONNREFUSED') || err.message.includes('socket') || err.message.includes('connection'))) {
+        console.warn(`Connection to container ${container.name} failed (attempt ${attempts}/${maxAttempts}). Retrying on a different container...`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        continue;
+      }
+      throw err;
+    } finally {
+      await pool.release(container);
     }
-
-    const verdict = poolRes.timedOut 
-      ? 'Time Limit Exceeded' 
-      : (poolRes.ok 
-          ? null 
-          : (cleanStderr.includes('javac') || cleanStderr.includes('g++') || cleanStderr.includes('compilation') || cleanStderr.includes('compile') 
-              ? 'Compilation Error' 
-              : 'Runtime Error'));
-
-    return {
-      ok: poolRes.ok,
-      output: poolRes.stdout,
-      error: poolRes.ok ? null : (cleanStderr || verdict),
-      stderr: cleanStderr || null,
-      runtimeMs: executionMs,
-      verdict
-    };
-  } finally {
-    await pool.release(container);
   }
+
+  throw lastError || new Error('Warm container execution failed after maximum retries');
 }
 

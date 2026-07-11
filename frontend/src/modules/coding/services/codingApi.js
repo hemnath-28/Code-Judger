@@ -25,9 +25,15 @@ export async function submitCode(payload) {
   return data;
 }
 
+export async function getSubmissionStatus(submissionId) {
+  const { data } = await api.get(`/submissions/status/${submissionId}`);
+  return data;
+}
+
 export async function fetchSubmissions(problemId) {
   const { data } = await api.get('/submissions', {
     params: problemId ? { problemId } : {}
   });
   return data.submissions;
 }
+

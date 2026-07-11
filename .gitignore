@@ -19,3 +19,9 @@ yarn-error.log*
 /backend/.env
 /backend/src/modules/seed
 ques.md
+
+# Testing and Helper Scripts
+/backend/check_*.js
+/backend/concurrency_test.js
+/backend/count_cases.js
+/backend/k6_*.js

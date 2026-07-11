@@ -17,15 +17,15 @@ export async function judgeSubmission({ submissionId, userId, problemId, languag
     throw apiError(404, 'Problem not found');
   }
 
-  const testCases = await TestCase.find({ problemId, isHidden: true })
+  const testCases = await TestCase.find({ problemId })
     .sort({ order: 1, createdAt: 1 })
     .lean();
 
   if (testCases.length === 0) {
-    throw apiError(409, 'No hidden test cases configured for this problem');
+    throw apiError(409, 'No test cases configured for this problem');
   }
 
-  // Build batch harness for all hidden test cases
+  // Build batch harness for all test cases
   const inputs = testCases.map(tc => tc.input);
   const execution = buildBatchHarness({
     problem,
