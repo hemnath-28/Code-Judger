@@ -12,9 +12,9 @@ process.env.DOCKER_API_VERSION = process.env.DOCKER_API_VERSION || '1.54';
 const DYNAMIC_PORT_START = Math.floor(Math.random() * 20000) + 15000;
 
 const POOL_CONFIG = {
-  python: { size: 100, portStart: DYNAMIC_PORT_START, image: env.docker.images.python },
-  java:   { size: 0,   portStart: DYNAMIC_PORT_START + 150, image: env.docker.images.java },
-  cpp:    { size: 0,   portStart: DYNAMIC_PORT_START + 150, image: env.docker.images.cpp }
+  python: { size: 3, portStart: DYNAMIC_PORT_START, image: env.docker.images.python },
+  java:   { size: 1,   portStart: DYNAMIC_PORT_START + 150, image: env.docker.images.java },
+  cpp:    { size: 1,   portStart: DYNAMIC_PORT_START + 300, image: env.docker.images.cpp }
 };
 
 const MAX_RUNS_BEFORE_RECYCLE = 100;
